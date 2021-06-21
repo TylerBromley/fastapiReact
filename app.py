@@ -1,7 +1,34 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from starlette.responses import JSONResponse
+from starlette.requests import Request
+from fastapi_mail import FastMail, MessageSchema, ConnectionConfig
+from pydantic import BaseModel, EmailStr
+from typing import List
 from tortoise.contrib.fastapi import register_tortoise
 from models import (supplier_pydantic, supplier_pydanticIn, Supplier, product_pydanticIn, product_pydantic, Product)
+from dotenv import dotenv_values
+from fastapi.middleware.cors import CORSMiddleware
+
+credentials = dotenv_values(".env")
+
+print(credentials)
+
+
 app = FastAPI()
+
+# adding cors urls
+origins = [
+    'http://localhost:3000'
+]
+
+# add middleware
+app.add_middleware(
+    CORSMiddleware, 
+    allow_origins = origins, 
+    allow_credentials=True,
+    allow_methods =["*"],
+    allow_headers = ["*"]
+)
 
 
 ##### HOME #####
@@ -62,7 +89,7 @@ async def all_products():
     response = await product_pydantic.from_queryset(Product.all())
     return {"status": "ok", "data": response}
 
-@app.get("/product/{id")
+@app.get("/product/{id}")
 async def spectific_product(id: int):
     response = await product_pydantic.from_queryset_single(Product.get(id = id))
     return {"status": "ok", "data": response}
@@ -86,6 +113,59 @@ async def delete_product(id: int):
     if not deleted_product:
         raise HTTPException(status_code=404, detail=f"Product {id} not found")
     return {"status": "ok"}
+
+class EmailSchema(BaseModel):
+    email: List[EmailStr]
+
+class EmailContent(BaseModel):
+    message: str
+    subject: str
+
+
+
+conf = ConnectionConfig(
+    MAIL_USERNAME = credentials["EMAIL"],
+    MAIL_PASSWORD = credentials["PASSWORD"],
+    MAIL_FROM = credentials["EMAIL"],
+    MAIL_PORT = 587,
+    MAIL_SERVER = "smtp.gmail.com",
+    MAIL_FROM_NAME="fastapiReact",
+    MAIL_TLS = True,
+    MAIL_SSL = False,
+    USE_CREDENTIALS = True
+)
+
+
+
+@app.post('/email/{product_id}')
+async def send_email(product_id: int, content: EmailContent):
+    product = await Product.get(id=product_id)
+    supplier = await product.supplied_by
+    supplier_email = [supplier.email]
+
+    html = f"""
+    <h5>John D. Industries</h5>
+    <br>
+    <p>{content.message}</p>
+    <br>
+    <h6>Best Regards,</h6>
+    <h6>John D.</h6>
+    """
+
+    message = MessageSchema(
+        subject=content.subject,
+        recipients=supplier_email,  # List of recipients, as many as you can pass 
+        body=html,
+        subtype="html"
+    )
+
+    fm = FastMail(conf)
+    await fm.send_message(message)
+    return {"status": "ok"}
+
+        
+
+
 
 
 #### DB SET-UP #####
